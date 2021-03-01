@@ -1,0 +1,268 @@
+% This code reproduces Figure 1 - requires spm12
+clear;clc;close all;rng(0);
+
+% specify states and parameters
+%--------------------------------------------------------------------------
+N               = 128;                      % number of time points
+n               = 3;                        % number of sources
+
+% model states - one real dependent variable only
+%--------------------------------------------------------------------------
+x.z             = zeros(n,1);               % initialise dependent variable
+
+% model parameters
+%--------------------------------------------------------------------------
+A               = spm_speye(n,n,-1);        % form of adjacency matrix
+P.A             = A/16 + A'/16 - eye(n)/8;  % intrinsic coupling matrix
+P.C             = sparse(1,1,1,n,1)/4;      % extrinsic coupling matrix
+
+% observation function (to generate timeseries)
+%--------------------------------------------------------------------------
+g               = @(x,v,P) x.z;
+
+% equation of motion (original, non-oscillatory state equation)
+%--------------------------------------------------------------------------
+f               = @(x,v,P) P.A*x.z+P.C*v;
+
+% causes or exogenous input (a Gaussian function of peristimulus time)
+%--------------------------------------------------------------------------
+Ug               = exp(-((1:N) - N/2).^2/((N/8)^2));
+
+% parameters for generalised filtering (see spm_DEM)
+%--------------------------------------------------------------------------
+E.n             = 4;                        % embedding dimension
+E.d             = 1;                        % data embedding
+E.nN            = 8;                        % number of iterations
+E.s             = 1/2;                      % smoothness of fluctuations
+
+% first level state space model
+%--------------------------------------------------------------------------
+M(1).E          = E;                        % filtering parameters
+M(1).x          = x;                        % initial states
+M(1).f          = f;                        % equations of motion
+M(1).g          = g;                        % observation mapping
+M(1).pE         = P;                        % model parameters
+M(1).V          = exp(16);                  % precision of observ. noise
+M(1).W          = exp(16);                  % precision of state noise
+
+% second level causes or exogenous forcing term
+%--------------------------------------------------------------------------
+M(2).v          = 0;                        % initial causes
+M(2).V          = exp(16);                  % precision of exogenous causes
+
+% create data from original (o) model with known parameters (P)
+%--------------------------------------------------------------------------
+disp('generating data using original model...')
+DEM_o           = spm_DEM_generate(M,Ug,P);
+
+% change equation of motion to modified oscillatory state equation with a
+% complex dependent variable, split the equation of motion into two - one
+% describing the real and one the imaginary component of the dependent
+% variable, with an observation function consisting of the real var. only
+%--------------------------------------------------------------------------
+clear x f g
+x.re            = zeros(n,1);               % real
+x.im            = zeros(n,1);               % imaginary
+M(1).x          = x;
+
+f               = @(x,v,P) [P.A*x.im;-(P.A*x.re+P.C*v)];       
+M(1).f          = f;                        % equations of motion
+
+g               = @(x,v,P) x.re;            % observation - real only
+M(1).g          = g;
+
+% create data from modified (m) model with known parameters (P)
+%--------------------------------------------------------------------------
+disp('generating data using modified model...')
+DEM_m           = spm_DEM_generate(M,Ug,P);
+
+% initialization of priors over parameters
+%--------------------------------------------------------------------------
+pE              = P;              	% prior parameters
+pE.A            = -speye(n)/4;    	% set prior intrinsic coupling
+
+pC            	= spm_zeros(P);     % prior variance
+pC.A            = (P.A ~= 0);       % set prior variance to 1
+
+% place priors in generative models
+%--------------------------------------------------------------------------
+DEM_o.M(1).pE	= pE;
+DEM_o.M(1).pC  	= diag(spm_vec(pC));
+
+DEM_m.M(1).pE	= pE;
+DEM_m.M(1).pC 	= diag(spm_vec(pC));
+
+DEM_o.M(1).V 	= exp(8);           % log precision of sampling noise
+DEM_o.M(1).W 	= exp(8);           % use precise beliefs about time
+DEM_m.M(1).V  	= exp(8);
+DEM_m.M(1).W	= exp(8);
+
+% Inversion using generalised filtering of original data using orig. model
+%--------------------------------------------------------------------------
+disp('inverting model of original data using original model, ~ 2 mins...')
+LAP_od_om    	= spm_DEM(DEM_o);
+
+% Inversion using generalised filtering of modified data using mod. model
+%--------------------------------------------------------------------------
+disp('inverting model of modified data using modified model, ~ 2 mins...')
+LAP_md_mm    	= spm_DEM(DEM_m);
+
+% change equation of motion to modified, oscillatory state equation
+% and place in generative model with data created by original,
+% non-oscillatory state equation
+%--------------------------------------------------------------------------
+clear x f g
+x.re            = zeros(n,1);                               % real
+x.im            = zeros(n,1);                               % imaginary
+
+f               = @(x,v,P) [P.A*x.im;-(P.A*x.re+P.C*v)];    % eqn. of mot.
+
+g               = @(x,v,P) x.re;                            % obs. func.
+
+DEM_o.M(1).x 	= x;
+DEM_o.M(1).f 	= f;
+DEM_o.M(1).g 	= g;
+
+% Inversion using generalised filtering of original data using mod. model
+%--------------------------------------------------------------------------
+disp('inverting model of original data using modified model, ~ 2 mins...')
+LAP_od_mm       = spm_DEM(DEM_o);
+
+% change equation of motion to original, non-oscillatory state equation
+% and place in generative model with data created by modified,
+% oscillatory state equation
+%--------------------------------------------------------------------------
+clear x f g
+x.z             = zeros(n,1); 
+
+f               = @(x,v,P) P.A*x.z+P.C*v;
+
+g               = @(x,v,P) x.z;
+
+DEM_m.M(1).x  	= x;
+DEM_m.M(1).f  	= f;
+DEM_m.M(1).g  	= g;
+
+% Inversion using generalised filtering of modified data using orig. model
+%--------------------------------------------------------------------------
+disp('inverting model of modified data using original model, ~ 2 mins...')
+LAP_md_om    	= spm_DEM(DEM_m);
+
+% Compare variational free energy (model evidence) of models of
+% original data inverted using both original and modified models,
+% and report marginal log likelihood or evidence
+%--------------------------------------------------------------------------
+Fo              = [LAP_od_om.F(end) LAP_od_mm.F(end)];
+Fo              = Fo - min(Fo);
+
+% Compare variational free energy (model evidence) of models of
+% modified data inverted using both original and modified models,
+% and report marginal log likelihood or evidence
+%--------------------------------------------------------------------------
+Fm              = [LAP_md_om.F(end) LAP_md_mm.F(end)];
+Fm              = Fm - min(Fm);
+
+% change to the mod. state equation, but without exog. input or noise
+%--------------------------------------------------------------------------
+clear x f g
+x.re         	= ones(n,1);  % real
+x.im        	= ones(n,1);  % imaginary
+M(1).x          = x;
+
+f               = @(x,v,P)   [P.A*x.im;-(P.A*x.re)];   % eqs. of mot.
+M(1).f          = f;
+
+% change the observation equation to the Hamiltonian 
+% (there is likely a more elegant way to write this)
+g = @(x,v,P)    sum(P.A(1,1)*(x.re(1)-1i*x.im(1))*(x.re(1)+1i*x.im(1))+...
+                    P.A(1,2)*(x.re(2)-1i*x.im(2))*(x.re(1)+1i*x.im(1))+...
+                    P.A(1,3)*(x.re(3)-1i*x.im(3))*(x.re(1)+1i*x.im(1))+...
+                    P.A(2,1)*(x.re(1)-1i*x.im(1))*(x.re(2)+1i*x.im(2))+...  
+                    P.A(2,2)*(x.re(2)-1i*x.im(2))*(x.re(2)+1i*x.im(2))+... 
+                    P.A(2,3)*(x.re(3)-1i*x.im(3))*(x.re(2)+1i*x.im(2))+...
+                    P.A(3,1)*(x.re(1)-1i*x.im(1))*(x.re(3)+1i*x.im(3))+...  
+                    P.A(3,2)*(x.re(2)-1i*x.im(2))*(x.re(3)+1i*x.im(3))+... 
+                    P.A(3,3)*(x.re(3)-1i*x.im(3))*(x.re(3)+1i*x.im(3)));
+M(1).g          = g;
+
+% causes or exogenous input (zero input) 
+%--------------------------------------------------------------------------
+U               = zeros(1,N);
+
+% create data showing hamiltonian (H) model with known parameters (P)
+%--------------------------------------------------------------------------
+disp('generating Hamiltonian data using original model...')
+DEM_H           = spm_DEM_generate(M,U,P);
+
+% reproduce Figure 1
+%--------------------------------------------------------------------------
+figure
+
+subplot(5,3,1)
+plot(Ug)
+title('1A')
+
+subplot(5,3,2)
+imagesc(full(LAP_od_om.pP.P{1}.A))
+colormap viridis
+colorbar
+title('1B')
+
+subplot(5,3,3)
+imagesc(full(LAP_od_om.M(1).pE.A))
+colormap viridis
+colorbar
+title('1C')
+
+subplot(5,3,4)
+plot(DEM_o.Y')
+title('1D')
+
+subplot(5,3,5)
+plot(DEM_m.Y')
+title('1E')
+
+subplot(5,3,6)
+imagesc(full(LAP_od_om.qP.P{1}.A))
+colormap viridis
+colorbar
+title('1F')
+
+subplot(5,3,7)
+imagesc(full(LAP_od_mm.qP.P{1}.A))
+colormap viridis
+colorbar
+title('1G')
+
+subplot(5,3,8)
+imagesc(full(LAP_md_om.qP.P{1}.A))
+colormap viridis
+colorbar
+title('1H')
+
+subplot(5,3,9)
+imagesc(full(LAP_md_mm.qP.P{1}.A))
+colormap viridis
+colorbar
+title('1I')
+
+subplot(5,3,10)
+bar(Fo,'c')
+title('1J')
+
+subplot(5,3,11)
+bar(spm_softmax(Fo(:)),'c')
+title('1J prob')
+
+subplot(5,3,12)
+bar(Fm,'c')
+title('1K')
+
+subplot(5,3,13)
+bar(spm_softmax(Fm(:)),'c')
+title('1K prob')
+
+subplot(5,3,14)
+plot(DEM_H.Y')
+axis([0 129 -0.26 -0.24])
+title('1L')
