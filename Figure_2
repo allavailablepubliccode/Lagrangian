@@ -1,0 +1,303 @@
+% This code reproduces Figure 2 - requires spm12
+clear;clc;close all;rng(0);
+
+% publicly available data base directory- 
+basedir = 'http://bnci-horizon-2020.eu/database/data-sets/';
+
+% Reference - EEG data
+%--------------------------------------------------------------------------
+% Real et al., Slow cortical potential training in stroke 
+% bnci-horizon-2020.eu/database/data-sets/006-2014/description.pdf
+
+% References - fNIRS data:
+%--------------------------------------------------------------------------
+% Pfurtscheller et al. Int J Psychophysiol, 76(3):186–192, 2010.
+% Bauernfeind et al., Med Biol Eng Comput, 49(9):979– 984, 2011.
+% Bauernfeind et al., 2004-2007, 2014.
+% Bauernfeind et al., PhD thesis, Graz University of Technology, 2012.
+
+% Reference - ECoG data:
+%--------------------------------------------------------------------------
+% Hermes et al., J Neurosci Methods. 2010 Jan 15;185(2):293-8
+
+% specify states and parameters
+%--------------------------------------------------------------------------
+N               = 128;      	% number of time points
+n               = 3;           	% number of channels
+
+% download fNIRS and ECoG data (3 channels)
+%--------------------------------------------------------------------------
+disp('downloading EEG data (22 Mb), saving in local directory...')
+websave('EEG_data.mat',[basedir '008-2014/A01.mat']);
+EEG = load('EEG_data.mat');
+EEG = EEG.data.X(1:N,1:n);
+
+disp('downloading fNIRS data (10 Mb), saving in local directory...')
+websave('fNIRS_data.mat',[basedir '003-2014/S01.mat']);
+fNIRS = load('fNIRS_data.mat');
+fNIRS = fNIRS.data{1}.X(1:N,1:n);
+
+disp('downloading ECoG data (56 Mb), saving in local directory...')
+websave('ECoG_data.mat',[basedir '011-2015/011-2015-1.mat']);
+ECoG = load('ECoG_data.mat');
+ECoG = ECoG.datainmicrovolts(1:N,1:n);
+
+% model states - one real dependent variable only
+%--------------------------------------------------------------------------
+x.z                         = zeros(n,1);
+
+% Prior means and variance
+%--------------------------------------------------------------------------
+A                           = zeros(n);     
+A(logical(eye(size(A))))    = -1/4;         
+P.A                         = A;        	% intrinsic coupling
+P.C                         = zeros(n,1); 	% extrinsic coupling matrix
+
+pC.A                        = ones(n);      % prior variance to unity
+pC.C                        = ones(n,1);
+
+% observation function (to generate timeseries)
+%--------------------------------------------------------------------------
+g                           = @(x,v,P) x.z;
+
+% equation of motion (original, non-oscillatory state equation)
+%--------------------------------------------------------------------------
+f               = @(x,v,P) P.A*x.z+P.C*v;
+
+% causes or exogenous input (random)
+%--------------------------------------------------------------------------
+DEM.U        	= rand(1,N);
+
+% parameters for generalised filtering (see spm_DEM)
+%--------------------------------------------------------------------------
+E.n          	= 4;                    % embedding dimension
+E.d          	= 1;                    % data embedding
+E.nN           	= 8;                    % number of iterations
+E.s            	= 1/2;                  % smoothness of fluctuations
+
+% first level state space model
+%--------------------------------------------------------------------------
+DEM.M(1).E   	= E;                    % filtering parameters
+DEM.M(1).x     	= x;                    % initial states
+DEM.M(1).f    	= f;                    % equations of motion
+DEM.M(1).g      = g;                    % observation mapping
+DEM.M(1).pE    	= P;                    % model parameters
+DEM.M(1).pC   	= diag(spm_vec(pC));    % prior variance
+DEM.M(1).V    	= exp(4);               % precision of observation noise
+DEM.M(1).W      = exp(4);               % precision of state noise
+
+% second level causes or exogenous forcing term
+%--------------------------------------------------------------------------
+DEM.M(2).v  	= 0;                   	% initial causes
+DEM.M(2).V  	= exp(4);             	% precision of exogenous causes
+
+% Bayesian model inversion using original model (o) for EEG data
+%--------------------------------------------------------------------------
+DEM.Y        	= double(EEG)'; 
+disp('model inversion with original equation for EEG data ~ 2 mins...')
+LAP_o_EEG    	= spm_DEM(DEM);
+
+% Bayesian model inversion using original model (o) for fNIRS data
+%--------------------------------------------------------------------------
+DEM.Y        	= double(fNIRS)'; 
+disp('model inversion with original equation for fNIRS data ~ 2 mins...')
+LAP_o_fNIRS    	= spm_DEM(DEM);
+
+% Bayesian model inversion using original model (o) for ECoG data
+%--------------------------------------------------------------------------
+DEM.Y        	= double(ECoG)';    	
+disp('model inversion with original equation for ECoG data ~ 2 mins...')
+LAP_o_ECoG   	= spm_DEM(DEM);
+
+% change equation of motion to modified oscillatory state equation with a
+% complex dependent variable, split the equation of motion into two - one
+% describing the real and one the imaginary component of the dependent
+% variable
+%--------------------------------------------------------------------------
+clear x f g
+x.re            = zeros(n,1);       % real
+x.im            = zeros(n,1);       % imaginary
+DEM.M(1).x    	= x;
+
+f               = @(x,v,P) [P.A*x.im;-(P.A*x.re+P.C*v)];
+DEM.M(1).f  	= f;                % equation of motion
+
+g               = @(x,v,P) x.re;
+DEM.M(1).g      = g;                % observation - real only
+
+% Bayesian model inversion using modified model (m) for EEG data
+%--------------------------------------------------------------------------
+disp('model inversion with modified equation for EEG data ~ 2 mins...')
+DEM.Y        	= double(EEG)'; 
+LAP_m_EEG    	= spm_DEM(DEM);
+
+% Bayesian model inversion using modified model (m) for fNIRS data
+%--------------------------------------------------------------------------
+DEM.Y           = double(fNIRS)';    
+disp('model inversion with modified equation for fNIRS data ~ 2 mins...')
+LAP_m_fNIRS   	= spm_DEM(DEM);
+          
+% Bayesian model inversion using modified model (m) for ECoG data
+%--------------------------------------------------------------------------
+DEM.Y         	= double(ECoG)';    
+disp('model inversion with modified equation for ECoG data ~ 2 mins...')
+LAP_m_ECoG    	= spm_DEM(DEM);
+
+% Compare variational free energy (model evidence) of original vs. 
+% modified equations of motion for the three datasets
+%--------------------------------------------------------------------------
+F_EEG        	= [LAP_o_EEG.F(end) LAP_m_EEG.F(end)];
+F_EEG       	= F_EEG - min(F_EEG);
+
+F_ECoG          = [LAP_o_ECoG.F(end) LAP_m_ECoG.F(end)];
+F_ECoG         	= F_ECoG - min(F_ECoG);
+
+F_fNIRS        	= [LAP_o_fNIRS.F(end) LAP_m_fNIRS.F(end)];
+F_fNIRS      	= F_fNIRS - min(F_fNIRS);
+
+% Calculate Hamiltonians
+%--------------------------------------------------------------------------
+U               = zeros(1,N);   % zero external input
+
+clear x P
+x.re            = ones(n,1);    % initialize at non-zero
+x.im            = ones(n,1);    
+
+% equation of motion without external input
+f               = @(x,v,P) [P.A*x.im;-(P.A*x.re)];
+
+% Hamiltonian - there is likely a more elegant way of writing this
+g = @(x,v,P)    real(sum(P.A(1,1)*(x.re(1)-1i*x.im(1))*...
+                (x.re(1)+1i*x.im(1))+...
+                    P.A(1,2)*(x.re(2)-1i*x.im(2))*(x.re(1)+1i*x.im(1))+...
+                    P.A(1,3)*(x.re(3)-1i*x.im(3))*(x.re(1)+1i*x.im(1))+...
+                    P.A(2,1)*(x.re(1)-1i*x.im(1))*(x.re(2)+1i*x.im(2))+...  
+                    P.A(2,2)*(x.re(2)-1i*x.im(2))*(x.re(2)+1i*x.im(2))+... 
+                    P.A(2,3)*(x.re(3)-1i*x.im(3))*(x.re(2)+1i*x.im(2))+...
+                    P.A(3,1)*(x.re(1)-1i*x.im(1))*(x.re(3)+1i*x.im(3))+...  
+                    P.A(3,2)*(x.re(2)-1i*x.im(2))*(x.re(3)+1i*x.im(3))+... 
+                    P.A(3,3)*(x.re(3)-1i*x.im(3))*(x.re(3)+1i*x.im(3))));
+
+M(1).E   	= E;                   
+M(1).x     	= x;                   
+M(1).f    	= f;             
+M(1).g      = g;                    
+M(1).V    	= exp(16);              % decrease noise
+M(1).W      = exp(16);              % decrease noise
+M(2).v  	= 0;                   
+M(2).V  	= exp(16);             	% decrease noise
+
+% furnish parameters with posteriors for EEG data 
+A           = LAP_m_EEG.qP.P{1}.A;
+A           = (A+A')-eye(size(A,1)).*diag(A);   % make matrix symmetric
+P.A         = A;
+M(1).pE    	= P;     
+disp('calculating Hamiltonian for EEG - modified model')
+H_m_EEG    	= spm_DEM_generate(M,U,P);      % generate Hamiltonian
+
+% furnish parameters with posteriors for fNIRS data 
+A           = LAP_m_fNIRS.qP.P{1}.A;
+A           = (A+A')-eye(size(A,1)).*diag(A);    
+P.A         = A;
+M(1).pE    	= P;      
+disp('calculating Hamiltonian for fNIRS - modified model')
+H_m_fNIRS  	= spm_DEM_generate(M,U,P);    
+ 
+% furnish parameters with posteriors for ECoG data modified model
+A           = LAP_m_ECoG.qP.P{1}.A;
+A           = (A+A')-eye(size(A,1)).*diag(A);    
+P.A         = A;
+M(1).pE    	= P; 
+disp('calculating Hamiltonian for ECoG - modified model')
+H_m_ECoG   	= spm_DEM_generate(M,U,P);   
+ 
+% reproduce Figure 2
+%--------------------------------------------------------------------------
+figure
+
+subplot(6,3,1)
+plot(EEG)
+title('2A')
+
+subplot(6,3,2)
+plot(fNIRS)
+title('2B')
+
+subplot(6,3,3)
+plot(ECoG)
+title('2C')
+
+subplot(6,3,4)
+imagesc(full(LAP_o_EEG.qP.P{1}.A))
+colormap viridis
+colorbar
+title('2D')
+
+subplot(6,3,5)
+imagesc(full(LAP_o_fNIRS.qP.P{1}.A))
+colormap viridis
+colorbar
+title('2E')
+
+subplot(6,3,6)
+imagesc(full(LAP_o_ECoG.qP.P{1}.A))
+colormap viridis
+colorbar
+title('2F')
+
+subplot(6,3,7)
+imagesc(full(LAP_m_EEG.qP.P{1}.A))
+colormap viridis
+colorbar
+title('2G')
+
+subplot(6,3,8)
+imagesc(full(LAP_m_fNIRS.qP.P{1}.A))
+colormap viridis
+colorbar
+title('2H')
+
+subplot(6,3,9)
+imagesc(full(LAP_m_ECoG.qP.P{1}.A))
+colormap viridis
+colorbar
+title('2I')
+
+subplot(6,3,10)
+bar(F_EEG,'c')
+title('2J')
+
+subplot(6,3,11)
+bar(spm_softmax(F_EEG(:)),'c')
+title('2J prob')
+
+subplot(6,3,12)
+bar(F_fNIRS,'c')
+title('2K')
+
+subplot(6,3,13)
+bar(spm_softmax(F_fNIRS(:)),'c')
+title('2K prob')
+
+subplot(6,3,14)
+bar(F_ECoG,'c')
+title('2L')
+
+subplot(6,3,15)
+bar(spm_softmax(F_ECoG(:)),'c')
+title('2L prob')
+
+subplot(6,3,16)
+plot(H_m_EEG.Y)
+axis([0 129 -1.69 -1.67])
+title('2M')
+
+subplot(6,3,17)
+plot(H_m_fNIRS.Y)
+axis([0 129 -0.07 -0.05])
+title('2N')
+
+subplot(6,3,18)
+plot(H_m_ECoG.Y)
+axis([0 129 -2.2 -2])
+title('2O')
