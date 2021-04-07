@@ -44,29 +44,37 @@ ECoG = ECoG.datainmicrovolts(1:N,1:n);
 
 % model states - one real dependent variable only
 %--------------------------------------------------------------------------
-x.z                         = zeros(n,1);
+x.z           	= zeros(n,1);
 
 % Prior means and variance
 %--------------------------------------------------------------------------
-A                           = zeros(n);     
-A(logical(eye(size(A))))    = -1/4;         
-P.A                         = A;        	% intrinsic coupling
-P.C                         = zeros(n,1); 	% extrinsic coupling matrix
+P.a11        	= -1/4;    	% set prior intrinsic coupling
+P.a22       	= -1/4;
+P.a33          = -1/4;
+P.a12        	= 0;
+P.a13        	= 0;
+P.a23       	= 0;
+P.C           	= zeros(n,1); 	% extrinsic coupling matrix
 
-pC.A                        = ones(n);      % prior variance to unity
-pC.C                        = ones(n,1);
+pC.a11          = 1;      % set prior variance to 1
+pC.a22         	= 1;
+pC.a33         	= 1;
+pC.a12       	= 1;
+pC.a13        	= 1;
+pC.a23        	= 1;
+pC.C          	= ones(n,1);
 
 % observation function (to generate timeseries)
 %--------------------------------------------------------------------------
-g                           = @(x,v,P) x.z;
+g           	= @(x,v,P) x.z;
 
 % equation of motion (original, non-oscillatory state equation)
 %--------------------------------------------------------------------------
-f               = @(x,v,P) P.A*x.z+P.C*v;
+f               = @(x,v,P) [P.a11 P.a12 P.a13;P.a12 P.a22 P.a23;P.a13 P.a23 P.a33]*x.z+P.C*v;
 
 % causes or exogenous input (random)
 %--------------------------------------------------------------------------
-DEM.U        	= rand(1,N);
+DEM.U           = rand(1,N);
 
 % parameters for generalised filtering (see spm_DEM)
 %--------------------------------------------------------------------------
@@ -119,7 +127,7 @@ x.re            = zeros(n,1);       % real
 x.im            = zeros(n,1);       % imaginary
 DEM.M(1).x    	= x;
 
-f               = @(x,v,P) [P.A*x.im;-(P.A*x.re+P.C*v)];
+f               = @(x,v,P) [[P.a11 P.a12 P.a13;P.a12 P.a22 P.a23;P.a13 P.a23 P.a33]*x.im;-([P.a11 P.a12 P.a13;P.a12 P.a22 P.a23;P.a13 P.a23 P.a33]*x.re+P.C*v)];    
 DEM.M(1).f  	= f;                % equation of motion
 
 g               = @(x,v,P) x.re;
@@ -159,24 +167,23 @@ F_fNIRS      	= F_fNIRS - min(F_fNIRS);
 %--------------------------------------------------------------------------
 U               = zeros(1,N);   % zero external input
 
-clear x P
+clear x P M
 x.re            = ones(n,1);    % initialize at non-zero
 x.im            = ones(n,1);    
 
 % equation of motion without external input
-f               = @(x,v,P) [P.A*x.im;-(P.A*x.re)];
+f    	= @(x,v,P) [[P.a11 P.a12 P.a13;P.a12 P.a22 P.a23;P.a13 P.a23 P.a33]*x.im;-[P.a11 P.a12 P.a13;P.a12 P.a22 P.a23;P.a13 P.a23 P.a33]*x.re];
 
 % Hamiltonian - there is likely a more elegant way of writing this
-g = @(x,v,P)    real(sum(P.A(1,1)*(x.re(1)-1i*x.im(1))*...
-                (x.re(1)+1i*x.im(1))+...
-                    P.A(1,2)*(x.re(2)-1i*x.im(2))*(x.re(1)+1i*x.im(1))+...
-                    P.A(1,3)*(x.re(3)-1i*x.im(3))*(x.re(1)+1i*x.im(1))+...
-                    P.A(2,1)*(x.re(1)-1i*x.im(1))*(x.re(2)+1i*x.im(2))+...  
-                    P.A(2,2)*(x.re(2)-1i*x.im(2))*(x.re(2)+1i*x.im(2))+... 
-                    P.A(2,3)*(x.re(3)-1i*x.im(3))*(x.re(2)+1i*x.im(2))+...
-                    P.A(3,1)*(x.re(1)-1i*x.im(1))*(x.re(3)+1i*x.im(3))+...  
-                    P.A(3,2)*(x.re(2)-1i*x.im(2))*(x.re(3)+1i*x.im(3))+... 
-                    P.A(3,3)*(x.re(3)-1i*x.im(3))*(x.re(3)+1i*x.im(3))));
+g = @(x,v,P)  abs(sum(P.a11*(x.re(1)-1i*x.im(1))*(x.re(1)+1i*x.im(1))+...
+                      P.a12*(x.re(2)-1i*x.im(2))*(x.re(1)+1i*x.im(1))+...
+                      P.a13*(x.re(3)-1i*x.im(3))*(x.re(1)+1i*x.im(1))+...
+                      P.a12*(x.re(1)-1i*x.im(1))*(x.re(2)+1i*x.im(2))+...  
+                      P.a22*(x.re(2)-1i*x.im(2))*(x.re(2)+1i*x.im(2))+... 
+                      P.a23*(x.re(3)-1i*x.im(3))*(x.re(2)+1i*x.im(2))+...
+                      P.a13*(x.re(1)-1i*x.im(1))*(x.re(3)+1i*x.im(3))+...
+                      P.a23*(x.re(2)-1i*x.im(2))*(x.re(3)+1i*x.im(3))+... 
+                      P.a33*(x.re(3)-1i*x.im(3))*(x.re(3)+1i*x.im(3))));
 
 M(1).E   	= E;                   
 M(1).x     	= x;                   
@@ -188,25 +195,36 @@ M(2).v  	= 0;
 M(2).V  	= exp(16);             	% decrease noise
 
 % furnish parameters with posteriors for EEG data 
-A           = LAP_m_EEG.qP.P{1}.A;
-A           = (A+A')-eye(size(A,1)).*diag(A);   % make matrix symmetric
-P.A         = A;
-M(1).pE    	= P;     
+P.a11      	= LAP_m_EEG.qP.P{1}.a11;    % intrinsic connectivities
+P.a22      	= LAP_m_EEG.qP.P{1}.a22; 
+P.a33     	= LAP_m_EEG.qP.P{1}.a33; 
+P.a12       = LAP_m_EEG.qP.P{1}.a12; 
+P.a13       = LAP_m_EEG.qP.P{1}.a13; 
+P.a23     	= LAP_m_EEG.qP.P{1}.a23; 
+M(1).pE 	= P; 
 disp('calculating Hamiltonian for EEG - modified model')
 H_m_EEG    	= spm_DEM_generate(M,U,P);      % generate Hamiltonian
 
 % furnish parameters with posteriors for fNIRS data 
-A           = LAP_m_fNIRS.qP.P{1}.A;
-A           = (A+A')-eye(size(A,1)).*diag(A);    
-P.A         = A;
+clear P
+P.a11      	= LAP_m_fNIRS.qP.P{1}.a11;    % intrinsic connectivities
+P.a22     	= LAP_m_fNIRS.qP.P{1}.a22; 
+P.a33     	= LAP_m_fNIRS.qP.P{1}.a33; 
+P.a12     	= LAP_m_fNIRS.qP.P{1}.a12; 
+P.a13       = LAP_m_fNIRS.qP.P{1}.a13; 
+P.a23     	= LAP_m_fNIRS.qP.P{1}.a23; 
 M(1).pE    	= P;      
 disp('calculating Hamiltonian for fNIRS - modified model')
 H_m_fNIRS  	= spm_DEM_generate(M,U,P);    
  
 % furnish parameters with posteriors for ECoG data modified model
-A           = LAP_m_ECoG.qP.P{1}.A;
-A           = (A+A')-eye(size(A,1)).*diag(A);    
-P.A         = A;
+clear P
+P.a11           = LAP_m_ECoG.qP.P{1}.a11;    % intrinsic connectivities
+P.a22           = LAP_m_ECoG.qP.P{1}.a22; 
+P.a33           = LAP_m_ECoG.qP.P{1}.a33; 
+P.a12           = LAP_m_ECoG.qP.P{1}.a12; 
+P.a13           = LAP_m_ECoG.qP.P{1}.a13; 
+P.a23           = LAP_m_ECoG.qP.P{1}.a23; 
 M(1).pE    	= P; 
 disp('calculating Hamiltonian for ECoG - modified model')
 H_m_ECoG   	= spm_DEM_generate(M,U,P);   
@@ -228,37 +246,37 @@ plot(ECoG)
 title('2C')
 
 subplot(6,3,4)
-imagesc(full(LAP_o_EEG.qP.P{1}.A))
+imagesc(full([LAP_o_EEG.qP.P{1}.a11 LAP_o_EEG.qP.P{1}.a12 LAP_o_EEG.qP.P{1}.a13;LAP_o_EEG.qP.P{1}.a12 LAP_o_EEG.qP.P{1}.a22 LAP_o_EEG.qP.P{1}.a23;LAP_o_EEG.qP.P{1}.a13 LAP_o_EEG.qP.P{1}.a23 LAP_o_EEG.qP.P{1}.a33]))
 colormap viridis
 colorbar
 title('2D')
 
 subplot(6,3,5)
-imagesc(full(LAP_o_fNIRS.qP.P{1}.A))
+imagesc(full([LAP_o_fNIRS.qP.P{1}.a11 LAP_o_fNIRS.qP.P{1}.a12 LAP_o_fNIRS.qP.P{1}.a13;LAP_o_fNIRS.qP.P{1}.a12 LAP_o_fNIRS.qP.P{1}.a22 LAP_o_fNIRS.qP.P{1}.a23;LAP_o_fNIRS.qP.P{1}.a13 LAP_o_fNIRS.qP.P{1}.a23 LAP_o_fNIRS.qP.P{1}.a33]))
 colormap viridis
 colorbar
 title('2E')
 
 subplot(6,3,6)
-imagesc(full(LAP_o_ECoG.qP.P{1}.A))
+imagesc(full([LAP_o_ECoG.qP.P{1}.a11 LAP_o_ECoG.qP.P{1}.a12 LAP_o_ECoG.qP.P{1}.a13;LAP_o_ECoG.qP.P{1}.a12 LAP_o_ECoG.qP.P{1}.a22 LAP_o_ECoG.qP.P{1}.a23;LAP_o_ECoG.qP.P{1}.a13 LAP_o_ECoG.qP.P{1}.a23 LAP_o_ECoG.qP.P{1}.a33]))
 colormap viridis
 colorbar
 title('2F')
 
 subplot(6,3,7)
-imagesc(full(LAP_m_EEG.qP.P{1}.A))
+imagesc(full([LAP_m_EEG.qP.P{1}.a11 LAP_m_EEG.qP.P{1}.a12 LAP_m_EEG.qP.P{1}.a13;LAP_m_EEG.qP.P{1}.a12 LAP_m_EEG.qP.P{1}.a22 LAP_m_EEG.qP.P{1}.a23;LAP_m_EEG.qP.P{1}.a13 LAP_m_EEG.qP.P{1}.a23 LAP_m_EEG.qP.P{1}.a33]))
 colormap viridis
 colorbar
 title('2G')
 
 subplot(6,3,8)
-imagesc(full(LAP_m_fNIRS.qP.P{1}.A))
+imagesc(full([LAP_m_fNIRS.qP.P{1}.a11 LAP_m_fNIRS.qP.P{1}.a12 LAP_m_fNIRS.qP.P{1}.a13;LAP_m_fNIRS.qP.P{1}.a12 LAP_m_fNIRS.qP.P{1}.a22 LAP_m_fNIRS.qP.P{1}.a23;LAP_m_fNIRS.qP.P{1}.a13 LAP_m_fNIRS.qP.P{1}.a23 LAP_m_fNIRS.qP.P{1}.a33]))
 colormap viridis
 colorbar
 title('2H')
 
 subplot(6,3,9)
-imagesc(full(LAP_m_ECoG.qP.P{1}.A))
+imagesc(full([LAP_m_ECoG.qP.P{1}.a11 LAP_m_ECoG.qP.P{1}.a12 LAP_m_ECoG.qP.P{1}.a13;LAP_m_ECoG.qP.P{1}.a12 LAP_m_ECoG.qP.P{1}.a22 LAP_m_ECoG.qP.P{1}.a23;LAP_m_ECoG.qP.P{1}.a13 LAP_m_ECoG.qP.P{1}.a23 LAP_m_ECoG.qP.P{1}.a33]))
 colormap viridis
 colorbar
 title('2I')
@@ -289,15 +307,15 @@ title('2L prob')
 
 subplot(6,3,16)
 plot(H_m_EEG.Y)
-axis([0 129 -1.69 -1.67])
+ylim([1.5 1.6])
 title('2M')
 
 subplot(6,3,17)
 plot(H_m_fNIRS.Y)
-axis([0 129 -0.07 -0.05])
+ylim([0 0.1])
 title('2N')
 
 subplot(6,3,18)
 plot(H_m_ECoG.Y)
-axis([0 129 -2.2 -2])
+ylim([1.6 1.7])
 title('2O')
