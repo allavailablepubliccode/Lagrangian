@@ -12,8 +12,11 @@ x.z             = zeros(n,1);               % initialise dependent variable
 
 % model parameters
 %--------------------------------------------------------------------------
-A               = spm_speye(n,n,-1);        % form of adjacency matrix
-P.A             = A/16 + A'/16 - eye(n)/8;  % intrinsic coupling matrix
+P.a11           = -1/8;                     % intrinsic connectivities
+P.a22           = -1/8;
+P.a33           = -1/8;
+P.a12           = 1/16;
+P.a23           = 1/16;
 P.C             = sparse(1,1,1,n,1)/4;      % extrinsic coupling matrix
 
 % observation function (to generate timeseries)
@@ -22,7 +25,7 @@ g               = @(x,v,P) x.z;
 
 % equation of motion (original, non-oscillatory state equation)
 %--------------------------------------------------------------------------
-f               = @(x,v,P) P.A*x.z+P.C*v;
+f               = @(x,v,P) [P.a11 P.a12 0;P.a12 P.a22 P.a23;0 P.a23 P.a33]*x.z+P.C*v;
 
 % causes or exogenous input (a Gaussian function of peristimulus time)
 %--------------------------------------------------------------------------
@@ -65,7 +68,7 @@ x.re            = zeros(n,1);               % real
 x.im            = zeros(n,1);               % imaginary
 M(1).x          = x;
 
-f               = @(x,v,P) [P.A*x.im;-(P.A*x.re+P.C*v)];       
+f               = @(x,v,P) [[P.a11 P.a12 0;P.a12 P.a22 P.a23;0 P.a23 P.a33]*x.im;-([P.a11 P.a12 0;P.a12 P.a22 P.a23;0 P.a23 P.a33]*x.re+P.C*v)];       
 M(1).f          = f;                        % equations of motion
 
 g               = @(x,v,P) x.re;            % observation - real only
@@ -78,11 +81,19 @@ DEM_m           = spm_DEM_generate(M,Ug,P);
 
 % initialization of priors over parameters
 %--------------------------------------------------------------------------
-pE              = P;              	% prior parameters
-pE.A            = -speye(n)/4;    	% set prior intrinsic coupling
+pE.a11           = -1/4;    	% set prior intrinsic coupling
+pE.a22           = -1/4;
+pE.a33           = -1/4;
+pE.a12           = 0;
+pE.a23           = 0;
+pE.C             = sparse(1,1,1,n,1)/4;
 
-pC            	= spm_zeros(P);     % prior variance
-pC.A            = (P.A ~= 0);       % set prior variance to 1
+pC.a11           = 1;      % set prior variance to 1
+pC.a22           = 1;
+pC.a33           = 1;
+pC.a12           = 1;
+pC.a23           = 1;
+pC.C             = zeros(n,1);
 
 % place priors in generative models
 %--------------------------------------------------------------------------
@@ -115,7 +126,7 @@ clear x f g
 x.re            = zeros(n,1);                               % real
 x.im            = zeros(n,1);                               % imaginary
 
-f               = @(x,v,P) [P.A*x.im;-(P.A*x.re+P.C*v)];    % eqn. of mot.
+f               = @(x,v,P) [[P.a11 P.a12 0;P.a12 P.a22 P.a23;0 P.a23 P.a33]*x.im;-([P.a11 P.a12 0;P.a12 P.a22 P.a23;0 P.a23 P.a33]*x.re+P.C*v)];    % eqn. of mot.
 
 g               = @(x,v,P) x.re;                            % obs. func.
 
@@ -135,7 +146,7 @@ LAP_od_mm       = spm_DEM(DEM_o);
 clear x f g
 x.z             = zeros(n,1); 
 
-f               = @(x,v,P) P.A*x.z+P.C*v;
+f               = @(x,v,P) [P.a11 P.a12 0;P.a12 P.a22 P.a23;0 P.a23 P.a33]*x.z+P.C*v;
 
 g               = @(x,v,P) x.z;
 
@@ -162,40 +173,47 @@ Fo              = Fo - min(Fo);
 Fm              = [LAP_md_om.F(end) LAP_md_mm.F(end)];
 Fm              = Fm - min(Fm);
 
-% change to the mod. state equation, but without exog. input or noise
+% use Hamiltonian as observation equation to generate timeseries
 %--------------------------------------------------------------------------
-clear x f g
-x.re         	= ones(n,1);  % real
-x.im        	= ones(n,1);  % imaginary
-M(1).x          = x;
+U               = zeros(1,N);   % zero external input
 
-f               = @(x,v,P)   [P.A*x.im;-(P.A*x.re)];   % eqs. of mot.
-M(1).f          = f;
+clear x f g P
+x.re   	= ones(n,1);                        % initialize at non-zero         
+x.im  	= ones(n,1);   
+M(1).x 	= x;
 
-% change the observation equation to the Hamiltonian 
-% (there is likely a more elegant way to write this)
-g = @(x,v,P)    sum(P.A(1,1)*(x.re(1)-1i*x.im(1))*(x.re(1)+1i*x.im(1))+...
-                    P.A(1,2)*(x.re(2)-1i*x.im(2))*(x.re(1)+1i*x.im(1))+...
-                    P.A(1,3)*(x.re(3)-1i*x.im(3))*(x.re(1)+1i*x.im(1))+...
-                    P.A(2,1)*(x.re(1)-1i*x.im(1))*(x.re(2)+1i*x.im(2))+...  
-                    P.A(2,2)*(x.re(2)-1i*x.im(2))*(x.re(2)+1i*x.im(2))+... 
-                    P.A(2,3)*(x.re(3)-1i*x.im(3))*(x.re(2)+1i*x.im(2))+...
-                    P.A(3,1)*(x.re(1)-1i*x.im(1))*(x.re(3)+1i*x.im(3))+...  
-                    P.A(3,2)*(x.re(2)-1i*x.im(2))*(x.re(3)+1i*x.im(3))+... 
-                    P.A(3,3)*(x.re(3)-1i*x.im(3))*(x.re(3)+1i*x.im(3)));
-M(1).g          = g;
+f    	= @(x,v,P) [[P.a11 P.a12 0;P.a12 P.a22 P.a23;0 P.a23 P.a33]*x.im;-[P.a11 P.a12 0;P.a12 P.a22 P.a23;0 P.a23 P.a33]*x.re];    % without external input
+M(1).f 	= f;
 
-% causes or exogenous input (zero input) 
-%--------------------------------------------------------------------------
-U               = zeros(1,N);
+% Hamiltonian - there is likely a more elegant way of writing this
+g = @(x,v,P) abs(sum(P.a11*(x.re(1)-1i*x.im(1))*(x.re(1)+1i*x.im(1))+...
+                      P.a12*(x.re(2)-1i*x.im(2))*(x.re(1)+1i*x.im(1))+...
+                      P.a12*(x.re(1)-1i*x.im(1))*(x.re(2)+1i*x.im(2))+...  
+                      P.a22*(x.re(2)-1i*x.im(2))*(x.re(2)+1i*x.im(2))+... 
+                      P.a23*(x.re(3)-1i*x.im(3))*(x.re(2)+1i*x.im(2))+...
+                      P.a23*(x.re(2)-1i*x.im(2))*(x.re(3)+1i*x.im(3))+... 
+                      P.a33*(x.re(3)-1i*x.im(3))*(x.re(3)+1i*x.im(3))));
+M(1).g 	= g;
 
-% create data showing hamiltonian (H) model with known parameters (P)
-%--------------------------------------------------------------------------
-disp('generating Hamiltonian data using original model...')
-DEM_H           = spm_DEM_generate(M,U,P);
+P.a11           = LAP_md_mm.qP.P{1}.a11;    % intrinsic connectivities
+P.a22           = LAP_md_mm.qP.P{1}.a22; 
+P.a33           = LAP_md_mm.qP.P{1}.a33; 
+P.a12           = LAP_md_mm.qP.P{1}.a12; 
+P.a23           = LAP_md_mm.qP.P{1}.a23; 
+M(1).pE 	= P;
+                
+Hamil           = spm_DEM_generate(M,U,P);
 
 % reproduce Figure 1
 %--------------------------------------------------------------------------
+% color limits
+clim = cat(3,full([LAP_od_om.pP.P{1}.a11 LAP_od_om.pP.P{1}.a12 0;LAP_od_om.pP.P{1}.a12 LAP_od_om.pP.P{1}.a22 LAP_od_om.pP.P{1}.a23;0 LAP_od_om.pP.P{1}.a23 LAP_od_om.pP.P{1}.a33]),...
+    full([LAP_od_om.M(1).pE.a11 LAP_od_om.M(1).pE.a12 0;LAP_od_om.M(1).pE.a12 LAP_od_om.M(1).pE.a22 LAP_od_om.M(1).pE.a23;0 LAP_od_om.M(1).pE.a23 LAP_od_om.M(1).pE.a33]),...
+    full([LAP_od_om.qP.P{1}.a11 LAP_od_om.qP.P{1}.a12 0;LAP_od_om.qP.P{1}.a12 LAP_od_om.qP.P{1}.a22 LAP_od_om.qP.P{1}.a23;0 LAP_od_om.qP.P{1}.a23 LAP_od_om.qP.P{1}.a33]),...
+    full([LAP_od_mm.qP.P{1}.a11 LAP_od_mm.qP.P{1}.a12 0;LAP_od_mm.qP.P{1}.a12 LAP_od_mm.qP.P{1}.a22 LAP_od_mm.qP.P{1}.a23;0 LAP_od_mm.qP.P{1}.a23 LAP_od_mm.qP.P{1}.a33]),...
+    full([LAP_od_om.qP.P{1}.a11 LAP_od_om.qP.P{1}.a12 0;LAP_od_om.qP.P{1}.a12 LAP_od_om.qP.P{1}.a22 LAP_od_om.qP.P{1}.a23;0 LAP_od_om.qP.P{1}.a23 LAP_od_om.qP.P{1}.a33]),...
+    full([LAP_md_mm.qP.P{1}.a11 LAP_md_mm.qP.P{1}.a12 0;LAP_md_mm.qP.P{1}.a12 LAP_md_mm.qP.P{1}.a22 LAP_md_mm.qP.P{1}.a23;0 LAP_md_mm.qP.P{1}.a23 LAP_md_mm.qP.P{1}.a33]));
+
 figure
 
 subplot(5,3,1)
@@ -203,13 +221,15 @@ plot(Ug)
 title('1A')
 
 subplot(5,3,2)
-imagesc(full(LAP_od_om.pP.P{1}.A))
+imagesc(full([LAP_od_om.pP.P{1}.a11 LAP_od_om.pP.P{1}.a12 0;LAP_od_om.pP.P{1}.a12 LAP_od_om.pP.P{1}.a22 LAP_od_om.pP.P{1}.a23;0 LAP_od_om.pP.P{1}.a23 LAP_od_om.pP.P{1}.a33]))
+caxis([min(clim(:)) max(clim(:))])
 colormap viridis
 colorbar
 title('1B')
 
 subplot(5,3,3)
-imagesc(full(LAP_od_om.M(1).pE.A))
+imagesc(full([LAP_od_om.M(1).pE.a11 LAP_od_om.M(1).pE.a12 0;LAP_od_om.M(1).pE.a12 LAP_od_om.M(1).pE.a22 LAP_od_om.M(1).pE.a23;0 LAP_od_om.M(1).pE.a23 LAP_od_om.M(1).pE.a33]))
+caxis([min(clim(:)) max(clim(:))])
 colormap viridis
 colorbar
 title('1C')
@@ -223,25 +243,29 @@ plot(DEM_m.Y')
 title('1E')
 
 subplot(5,3,6)
-imagesc(full(LAP_od_om.qP.P{1}.A))
+imagesc(full([LAP_od_om.qP.P{1}.a11 LAP_od_om.qP.P{1}.a12 0;LAP_od_om.qP.P{1}.a12 LAP_od_om.qP.P{1}.a22 LAP_od_om.qP.P{1}.a23;0 LAP_od_om.qP.P{1}.a23 LAP_od_om.qP.P{1}.a33]))
+caxis([min(clim(:)) max(clim(:))])
 colormap viridis
 colorbar
 title('1F')
 
 subplot(5,3,7)
-imagesc(full(LAP_od_mm.qP.P{1}.A))
+imagesc(full([LAP_od_mm.qP.P{1}.a11 LAP_od_mm.qP.P{1}.a12 0;LAP_od_mm.qP.P{1}.a12 LAP_od_mm.qP.P{1}.a22 LAP_od_mm.qP.P{1}.a23;0 LAP_od_mm.qP.P{1}.a23 LAP_od_mm.qP.P{1}.a33]))
+caxis([min(clim(:)) max(clim(:))])
 colormap viridis
 colorbar
 title('1G')
 
 subplot(5,3,8)
-imagesc(full(LAP_md_om.qP.P{1}.A))
+imagesc(full([LAP_od_om.qP.P{1}.a11 LAP_od_om.qP.P{1}.a12 0;LAP_od_om.qP.P{1}.a12 LAP_od_om.qP.P{1}.a22 LAP_od_om.qP.P{1}.a23;0 LAP_od_om.qP.P{1}.a23 LAP_od_om.qP.P{1}.a33]))
+caxis([min(clim(:)) max(clim(:))])
 colormap viridis
 colorbar
 title('1H')
 
 subplot(5,3,9)
-imagesc(full(LAP_md_mm.qP.P{1}.A))
+imagesc(full([LAP_md_mm.qP.P{1}.a11 LAP_md_mm.qP.P{1}.a12 0;LAP_md_mm.qP.P{1}.a12 LAP_md_mm.qP.P{1}.a22 LAP_md_mm.qP.P{1}.a23;0 LAP_md_mm.qP.P{1}.a23 LAP_md_mm.qP.P{1}.a33]))
+caxis([min(clim(:)) max(clim(:))])
 colormap viridis
 colorbar
 title('1I')
@@ -263,6 +287,6 @@ bar(spm_softmax(Fm(:)),'c')
 title('1K prob')
 
 subplot(5,3,14)
-plot(DEM_H.Y')
-axis([0 129 -0.26 -0.24])
+plot(Hamil.Y)
+ylim([1.3 1.4])
 title('1L')
