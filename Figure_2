@@ -50,7 +50,7 @@ x.z           	= zeros(n,1);
 %--------------------------------------------------------------------------
 P.a11        	= -1/4;    	% set prior intrinsic coupling
 P.a22       	= -1/4;
-P.a33          = -1/4;
+P.a33           = -1/4;
 P.a12        	= 0;
 P.a13        	= 0;
 P.a23       	= 0;
@@ -307,15 +307,15 @@ title('2L prob')
 
 subplot(6,3,16)
 plot(H_m_EEG.Y)
-ylim([1.5 1.6])
+ylim([1.58937241 1.58937242])
 title('2M')
 
 subplot(6,3,17)
 plot(H_m_fNIRS.Y)
-ylim([0 0.1])
+ylim([0.07018157 0.07018158])
 title('2N')
 
 subplot(6,3,18)
 plot(H_m_ECoG.Y)
-ylim([1.6 1.7])
+ylim([1.65398004 1.65398005])
 title('2O')
