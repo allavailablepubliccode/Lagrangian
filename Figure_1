@@ -288,5 +288,5 @@ title('1K prob')
 
 subplot(5,3,14)
 plot(Hamil.Y)
-ylim([1.345731 1.345732])
+ylim([1.34573189 1.3457319])
 title('1L')
