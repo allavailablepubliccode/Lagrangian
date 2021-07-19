@@ -257,7 +257,7 @@ colorbar
 title('1G')
 
 subplot(5,3,8)
-imagesc(full([LAP_od_om.qP.P{1}.a11 LAP_od_om.qP.P{1}.a12 0;LAP_od_om.qP.P{1}.a12 LAP_od_om.qP.P{1}.a22 LAP_od_om.qP.P{1}.a23;0 LAP_od_om.qP.P{1}.a23 LAP_od_om.qP.P{1}.a33]))
+imagesc(full([LAP_md_om.qP.P{1}.a11 LAP_md_om.qP.P{1}.a12 0;LAP_md_om.qP.P{1}.a12 LAP_md_om.qP.P{1}.a22 LAP_md_om.qP.P{1}.a23;0 LAP_md_om.qP.P{1}.a23 LAP_md_om.qP.P{1}.a33]))
 caxis([min(clim(:)) max(clim(:))])
 colormap viridis
 colorbar
